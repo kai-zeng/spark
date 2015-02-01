@@ -96,11 +96,6 @@ abstract class Expression extends TreeNode[Expression] {
       e1: Expression,
       e2: Expression,
       f: ((Numeric[Any], Any, Any) => Any)): Any  = {
-
-    if (e1.dataType != e2.dataType) {
-      throw new TreeNodeException(this,  s"Types do not match ${e1.dataType} != ${e2.dataType}")
-    }
-
     val evalE1 = e1.eval(i)
     if(evalE1 == null) {
       null
@@ -114,39 +109,6 @@ abstract class Expression extends TreeNode[Expression] {
             f.asInstanceOf[(Numeric[n.JvmType], n.JvmType, n.JvmType) => n.JvmType](
               n.numeric, evalE1.asInstanceOf[n.JvmType], evalE2.asInstanceOf[n.JvmType])
           case other => sys.error(s"Type $other does not support numeric operations")
-        }
-      }
-    }
-  }
-
-  /**
-   * Evaluation helper function for 2 Fractional children expressions. Those expressions are
-   * supposed to be in the same data type, and also the return type.
-   * Either one of the expressions result is null, the evaluation result should be null.
-   */
-  @inline
-  protected final def f2(
-      i: Row,
-      e1: Expression,
-      e2: Expression,
-      f: ((Fractional[Any], Any, Any) => Any)): Any  = {
-    if (e1.dataType != e2.dataType) {
-      throw new TreeNodeException(this,  s"Types do not match ${e1.dataType} != ${e2.dataType}")
-    }
-
-    val evalE1 = e1.eval(i: Row)
-    if(evalE1 == null) {
-      null
-    } else {
-      val evalE2 = e2.eval(i: Row)
-      if (evalE2 == null) {
-        null
-      } else {
-        e1.dataType match {
-          case ft: FractionalType =>
-            f.asInstanceOf[(Fractional[ft.JvmType], ft.JvmType, ft.JvmType) => ft.JvmType](
-              ft.fractional, evalE1.asInstanceOf[ft.JvmType], evalE2.asInstanceOf[ft.JvmType])
-          case other => sys.error(s"Type $other does not support fractional operations")
         }
       }
     }
@@ -167,42 +129,6 @@ abstract class Expression extends TreeNode[Expression] {
           f.asInstanceOf[(Fractional[ft.JvmType], ft.JvmType) => ft.JvmType](
             ft.fractional, evalE1.asInstanceOf[ft.JvmType])
         case other => sys.error(s"Type $other does not support fractional operations")
-      }
-    }
-  }
-
-  /**
-   * Evaluation helper function for 2 Integral children expressions. Those expressions are
-   * supposed to be in the same data type, and also the return type.
-   * Either one of the expressions result is null, the evaluation result should be null.
-   */
-  @inline
-  protected final def i2(
-      i: Row,
-      e1: Expression,
-      e2: Expression,
-      f: ((Integral[Any], Any, Any) => Any)): Any  = {
-    if (e1.dataType != e2.dataType) {
-      throw new TreeNodeException(this,  s"Types do not match ${e1.dataType} != ${e2.dataType}")
-    }
-
-    val evalE1 = e1.eval(i)
-    if(evalE1 == null) {
-      null
-    } else {
-      val evalE2 = e2.eval(i)
-      if (evalE2 == null) {
-        null
-      } else {
-        e1.dataType match {
-          case i: IntegralType =>
-            f.asInstanceOf[(Integral[i.JvmType], i.JvmType, i.JvmType) => i.JvmType](
-              i.integral, evalE1.asInstanceOf[i.JvmType], evalE2.asInstanceOf[i.JvmType])
-          case i: FractionalType =>
-            f.asInstanceOf[(Integral[i.JvmType], i.JvmType, i.JvmType) => i.JvmType](
-              i.asIntegral, evalE1.asInstanceOf[i.JvmType], evalE2.asInstanceOf[i.JvmType])
-          case other => sys.error(s"Type $other does not support numeric operations")
-        }
       }
     }
   }
