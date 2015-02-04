@@ -6,7 +6,7 @@ import org.apache.spark.{SparkConf, SparkContext}
 
 object SQLSuite {
 
-  val master = "ec2-54-174-247-196.compute-1.amazonaws.com"
+  val master = "ec2-52-0-52-60.compute-1.amazonaws.com"
   val spark = s"spark://$master:7077"
   val hdfs = s"hdfs://$master:9010"
 
