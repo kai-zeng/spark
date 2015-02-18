@@ -30,29 +30,31 @@ import org.apache.spark.sql.test.TestSQLContext._
 class ParquetQuerySuiteBase extends QueryTest with ParquetTest {
   val sqlContext = TestSQLContext
 
-  test("simple projection") {
+  test("simple select queries") {
     withParquetTable((0 until 10).map(i => (i, i.toString)), "t") {
-      checkAnswer(sql("SELECT _1 FROM t"), (0 until 10).map(Row.apply(_)))
+      checkAnswer(sql("SELECT _1 FROM t where t._1 > 5"), (6 until 10).map(Row.apply(_)))
+      checkAnswer(sql("SELECT _1 FROM t as tmp where tmp._1 < 5"), (0 until 5).map(Row.apply(_)))
     }
   }
 
   test("appending") {
     val data = (0 until 10).map(i => (i, i.toString))
+    createDataFrame(data).toDF("c1", "c2").registerTempTable("tmp")
     withParquetTable(data, "t") {
-      sql("INSERT INTO TABLE t SELECT * FROM t")
+      sql("INSERT INTO TABLE t SELECT * FROM tmp")
       checkAnswer(table("t"), (data ++ data).map(Row.fromTuple))
     }
+    catalog.unregisterTable(Seq("tmp"))
   }
 
-  // This test case will trigger the NPE mentioned in
-  // https://issues.apache.org/jira/browse/PARQUET-151.
-  // Update: This also triggers SPARK-5746, should re enable it when we get both fixed.
-  ignore("overwriting") {
+  test("overwriting") {
     val data = (0 until 10).map(i => (i, i.toString))
+    createDataFrame(data).toDF("c1", "c2").registerTempTable("tmp")
     withParquetTable(data, "t") {
-      sql("INSERT OVERWRITE TABLE t SELECT * FROM t")
+      sql("INSERT OVERWRITE TABLE t SELECT * FROM tmp")
       checkAnswer(table("t"), data.map(Row.fromTuple))
     }
+    catalog.unregisterTable(Seq("tmp"))
   }
 
   test("self-join") {
@@ -66,7 +68,7 @@ class ParquetQuerySuiteBase extends QueryTest with ParquetTest {
       val selfJoin = sql("SELECT * FROM t x JOIN t y WHERE x._1 = y._1")
       val queryOutput = selfJoin.queryExecution.analyzed.output
 
-      assertResult(4, "Field count mismatche")(queryOutput.size)
+      assertResult(4, "Field count mismatches")(queryOutput.size)
       assertResult(2, "Duplicated expression ID in query plan:\n $selfJoin") {
         queryOutput.filter(_.name == "_1").map(_.exprId).size
       }
