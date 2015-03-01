@@ -58,7 +58,7 @@ object SQLSuite {
         }
         cacheRun(queryName)
 
-        Range(0, 4).foreach { i =>
+        Range(0, 100).foreach { i =>
           println(s"REMARK: Running $queryName baseline #$i...")
           hiveRun(queryName)
         }
