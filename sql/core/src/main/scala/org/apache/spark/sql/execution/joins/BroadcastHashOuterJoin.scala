@@ -19,10 +19,11 @@ package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, UnspecifiedDistribution}
+import org.apache.spark.sql.catalyst.plans.physical.UnspecifiedDistribution
+import org.apache.spark.sql.catalyst.plans.{JoinType, LeftOuter, RightOuter}
 import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
-import org.apache.spark.util.collection.CompactBuffer
 
+import scala.collection.JavaConversions._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
 import scala.concurrent.duration._
@@ -33,21 +34,15 @@ import scala.concurrent.duration._
  * being constructed, a Spark job is asynchronously started to calculate the values for the
  * broadcasted relation.  This data is then placed in a Spark broadcast variable.  The streamed
  * relation is not shuffled.
- *
- * TODO: A better comment about buildSide
- * Comment:In left(right) outer join only the right(left) table has an
- * estimated physical size smaller than the user-settable threshold
- * [[org.apache.spark.sql.SQLConf.AUTO_BROADCASTJOIN_THRESHOLD]] the planner
- * would mark it as the broadcasted relation.
  */
 @DeveloperApi
 case class BroadcastHashOuterJoin(
     leftKeys: Seq[Expression],
     rightKeys: Seq[Expression],
-    buildSide: BuildSide,
+    joinType: JoinType,
+    condition: Option[Expression],
     left: SparkPlan,
-    right: SparkPlan)
-  extends BinaryNode with HashJoin {
+    right: SparkPlan) extends BinaryNode with HashOuterJoin {
 
   val timeout = {
     val timeoutValue = sqlContext.conf.broadcastTimeout
@@ -58,26 +53,24 @@ case class BroadcastHashOuterJoin(
     }
   }
 
-  override def output = buildSide match {
-    case BuildLeft => left.output.map(_.withNullability(true)) ++ right.output
-    case BuildRight => left.output ++ right.output.map(_.withNullability(true))
-  }
-
-  override def outputPartitioning: Partitioning = streamedPlan.outputPartitioning
-
   override def requiredChildDistribution =
     UnspecifiedDistribution :: UnspecifiedDistribution :: Nil
+
+  lazy val (buildPlan, streamedPlan) = joinType match {
+    case RightOuter => (left, right)
+    case LeftOuter => (right, left)
+  }
+
+  lazy val (buildKeys, streamedKeys) = joinType match {
+    case RightOuter => (leftKeys, rightKeys)
+    case LeftOuter => (rightKeys, leftKeys)
+  }
 
   @transient
   private val broadcastFuture = future {
     // Note that we use .execute().collect() because we don't want to convert data to Scala types
     val input: Array[Row] = buildPlan.execute().map(_.copy()).collect()
-    val nullRow = buildSide match {
-      case BuildLeft => new GenericRow(left.output.length)
-      case BuildRight => new GenericRow(right.output.length)
-    }
-    val hashed = HashedRelationWithDefault(
-      HashedRelation(input.iterator, buildSideKeyGenerator, input.length), CompactBuffer(nullRow))
+    val hashed = buildHashTable(input.iterator, newProjection(buildKeys, buildPlan.output))
     sparkContext.broadcast(hashed)
   }
 
@@ -85,7 +78,25 @@ case class BroadcastHashOuterJoin(
     val broadcastRelation = Await.result(broadcastFuture, timeout)
 
     streamedPlan.execute().mapPartitions { streamedIter =>
-      hashJoin(streamedIter, broadcastRelation.value)
+      val joinedRow = new JoinedRow()
+      val keyGenerator = newProjection(streamedKeys, streamedPlan.output)
+      val hashTable = broadcastRelation.value
+
+      joinType match {
+        case LeftOuter =>
+          streamedIter.flatMap(currentRow => {
+            val rowKey = keyGenerator(currentRow)
+            joinedRow.withLeft(currentRow)
+            leftOuterIterator(rowKey, joinedRow, hashTable.getOrElse(rowKey, EMPTY_LIST))
+          })
+
+        case RightOuter =>
+          streamedIter.flatMap(currentRow => {
+            val rowKey = keyGenerator(currentRow)
+            joinedRow.withRight(currentRow)
+            rightOuterIterator(rowKey, hashTable.getOrElse(rowKey, EMPTY_LIST), joinedRow)
+          })
+      }
     }
   }
 }

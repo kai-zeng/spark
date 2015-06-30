@@ -60,16 +60,6 @@ private[joins] final class UniqueKeyHashedRelation(hashTable: JavaHashMap[Row, R
 
 // TODO(rxin): a version of [[HashedRelation]] backed by arrays for consecutive integer keys.
 
-private[joins] final case class HashedRelationWithDefault(
-    hashedRelation: HashedRelation,
-    default: CompactBuffer[Row])
-  extends HashedRelation with Serializable {
-  def get(key: Row): CompactBuffer[Row] = {
-    val buffer = hashedRelation.get(key)
-    if (buffer eq null) default else buffer
-  }
-}
-
 private[joins] object HashedRelation {
 
   def apply(
