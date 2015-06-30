@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution.joins
 
 import java.util.{HashMap => JavaHashMap}
 
-import org.apache.spark.sql.catalyst.expressions.{Projection, Row}
+import org.apache.spark.sql.catalyst.expressions.{EmptyRow, Projection, Row}
 import org.apache.spark.util.collection.CompactBuffer
 
 
@@ -60,6 +60,15 @@ private[joins] final class UniqueKeyHashedRelation(hashTable: JavaHashMap[Row, R
 
 // TODO(rxin): a version of [[HashedRelation]] backed by arrays for consecutive integer keys.
 
+private[joins] final case class HashedRelationWithDefault(
+    hashedRelation: HashedRelation,
+    default: CompactBuffer[Row])
+  extends HashedRelation with Serializable {
+  def get(key: Row): CompactBuffer[Row] = {
+    val buffer = hashedRelation.get(key)
+    if (buffer eq null) default else buffer
+  }
+}
 
 private[joins] object HashedRelation {
 
