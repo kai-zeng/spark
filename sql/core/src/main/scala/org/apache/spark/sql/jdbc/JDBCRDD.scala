@@ -251,7 +251,7 @@ private[sql] class JDBCRDD(
   /**
    * `columns`, but as a String suitable for injection into a SQL query.
    */
-  private val columnList: String = {
+  protected val columnList: String = {
     val sb = new StringBuilder()
     columns.foreach(x => sb.append(",").append(x))
     if (sb.length == 0) "1" else sb.substring(1)
@@ -284,7 +284,7 @@ private[sql] class JDBCRDD(
   /**
    * `filters`, but as a WHERE clause suitable for injection into a SQL query.
    */
-  private val filterWhereClause: String = {
+  protected val filterWhereClause: String = {
     val filterStrings = filters map compileFilter filter (_ != null)
     if (filterStrings.size > 0) {
       val sb = new StringBuilder("WHERE ")
@@ -296,7 +296,7 @@ private[sql] class JDBCRDD(
   /**
    * A WHERE clause representing both `filters`, if any, and the current partition.
    */
-  private def getWhereClause(part: JDBCPartition): String = {
+  protected def getWhereClause(part: JDBCPartition): String = {
     if (part.whereClause != null && filterWhereClause.length > 0) {
       filterWhereClause + " AND " + part.whereClause
     } else if (part.whereClause != null) {
