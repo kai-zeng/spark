@@ -27,14 +27,19 @@ import org.apache.spark.util.CallSite
  */
 private[spark] class ActiveJob(
     val jobId: Int,
-    val finalStage: ResultStage,
+    val finalStage: Stage,
     val func: (TaskContext, Iterator[_]) => _,
     val partitions: Array[Int],
     val callSite: CallSite,
     val listener: JobListener,
     val properties: Properties) {
 
-  val numPartitions = partitions.length
+  val numPartitions = finalStage match {
+    case r: ResultStage => partitions.length
+    case m: ShuffleMapStage => m.rdd.partitions.size
+  }
+
   val finished = Array.fill[Boolean](numPartitions)(false)
+
   var numFinished = 0
 }
