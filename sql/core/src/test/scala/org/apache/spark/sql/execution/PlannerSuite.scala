@@ -157,4 +157,15 @@ class PlannerSuite extends SparkFunSuite {
     val planned = planner.TakeOrderedAndProject(query)
     assert(planned.head.isInstanceOf[execution.TakeOrderedAndProject])
   }
+
+  test("transitive partitioning") {
+    val t1 = testData.as("t1")
+    val t2 = testData.as("t2")
+    val t3 = testData2.as("t3")
+
+    val planned = t1.join(t2, $"t1.key" === $"t2.key")
+      .join(t3, $"t3.a" === $"t2.key").queryExecution.executedPlan
+
+    assert(planned.collect { case e: Exchange => e }.size == 3, "Should use 3 exchanges")
+  }
 }

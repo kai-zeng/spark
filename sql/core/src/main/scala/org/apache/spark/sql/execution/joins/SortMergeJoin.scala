@@ -40,7 +40,8 @@ case class SortMergeJoin(
 
   override def output: Seq[Attribute] = left.output ++ right.output
 
-  override def outputPartitioning: Partitioning = left.outputPartitioning
+  override def outputPartitioning: Partitioning =
+    Partitioning.either(left.outputPartitioning, right.outputPartitioning)
 
   override def requiredChildDistribution: Seq[Distribution] =
     ClusteredDistribution(leftKeys) :: ClusteredDistribution(rightKeys) :: Nil

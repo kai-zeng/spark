@@ -143,8 +143,8 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
   protected override def doExecute(): RDD[InternalRow] = attachTree(this , "execute") {
     val rdd = child.execute()
     val part: Partitioner = newPartitioning match {
-      case HashPartitioning(expressions, numPartitions) => new HashPartitioner(numPartitions)
-      case RangePartitioning(sortingExpressions, numPartitions) =>
+      case HashPartitioning(expressions, numPartitions, _) => new HashPartitioner(numPartitions)
+      case RangePartitioning(sortingExpressions, numPartitions, _) =>
         // Internally, RangePartitioner runs a job on the RDD that samples keys to compute
         // partition bounds. To get accurate samples, we need to copy the mutable keys.
         val rddForSampling = rdd.mapPartitions { iter =>
@@ -162,8 +162,8 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
       // TODO: Handle BroadcastPartitioning.
     }
     def getPartitionKeyExtractor(): InternalRow => InternalRow = newPartitioning match {
-      case HashPartitioning(expressions, _) => newMutableProjection(expressions, child.output)()
-      case RangePartitioning(_, _) | SinglePartition => identity
+      case HashPartitioning(expressions, _, _) => newMutableProjection(expressions, child.output)()
+      case RangePartitioning(_, _, _) | SinglePartition => identity
       case _ => sys.error(s"Exchange not implemented for $newPartitioning")
     }
     val rddWithPartitionIds: RDD[Product2[Int, InternalRow]] = {
@@ -239,10 +239,11 @@ private[sql] case class EnsureRequirements(sqlContext: SQLContext) extends Rule[
           child: SparkPlan): SparkPlan = {
 
         def addShuffleIfNecessary(child: SparkPlan): SparkPlan = {
-          if (child.outputPartitioning != partitioning) {
-            Exchange(partitioning, child)
-          } else {
-            child
+          (child.outputPartitioning, partitioning) match {
+            case (actual: Expression, expected: Expression) =>
+              if (actual.semanticEquals(expected)) child else Exchange(actual, child)
+            case (actual, expected) if actual != expected => Exchange(expected, child)
+            case _ => child
           }
         }
 

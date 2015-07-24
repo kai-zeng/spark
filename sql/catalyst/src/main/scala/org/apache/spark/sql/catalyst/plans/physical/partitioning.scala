@@ -98,6 +98,16 @@ sealed trait Partitioning {
   def keyExpressions: Seq[Expression]
 }
 
+object Partitioning {
+  def either(left: Partitioning, right: Partitioning): Partitioning = (left, right) match {
+    case (HashPartitioning(e1, n1, v1), HashPartitioning(e2, n2, v2)) =>
+      HashPartitioning(e1, n1, e2 +: (v1 ++ v2))
+    case (RangePartitioning(o1, n1, v1), RangePartitioning(o2, n2, v2)) =>
+      RangePartitioning(o1, n1, o2 +: (v1 ++ v2))
+    case _ => left
+  }
+}
+
 case class UnknownPartitioning(numPartitions: Int) extends Partitioning {
   override def satisfies(required: Distribution): Boolean = required match {
     case UnspecifiedDistribution => true
@@ -143,29 +153,40 @@ case object BroadcastPartitioning extends Partitioning {
  * of `expressions`.  All rows where `expressions` evaluate to the same values are guaranteed to be
  * in the same partition.
  */
-case class HashPartitioning(expressions: Seq[Expression], numPartitions: Int)
+case class HashPartitioning(
+    expressions: Seq[Expression],
+    numPartitions: Int,
+    equivalents: Seq[Seq[Expression]] = Nil)
   extends Expression with Partitioning with Unevaluable {
 
-  override def children: Seq[Expression] = expressions
+  override def children: Seq[Expression] = keys.flatten
   override def nullable: Boolean = false
   override def dataType: DataType = IntegerType
 
-  private[this] lazy val clusteringSet = expressions.toSet
+  private[this] lazy val keys: Seq[Seq[Expression]] = expressions +: equivalents
+
+  private[this] lazy val clusteringSet = keys.map(_.toSet)
 
   override def satisfies(required: Distribution): Boolean = required match {
     case UnspecifiedDistribution => true
     case ClusteredDistribution(requiredClustering) =>
-      clusteringSet.subsetOf(requiredClustering.toSet)
+      clusteringSet.exists(_.subsetOf(requiredClustering.toSet))
     case _ => false
   }
 
   override def compatibleWith(other: Partitioning): Boolean = other match {
     case BroadcastPartitioning => true
-    case h: HashPartitioning if h == this => true
+    case h: HashPartitioning if h.semanticEquals(this) => true
     case _ => false
   }
 
   override def keyExpressions: Seq[Expression] = expressions
+
+  override def semanticEquals(other: Expression): Boolean = other match {
+    case HashPartitioning(exprs, numParts, equivs) =>
+      (expressions +: equivalents).exists((exprs +: equivs).contains)
+    case _ => false
+  }
 }
 
 /**
@@ -180,30 +201,41 @@ case class HashPartitioning(expressions: Seq[Expression], numPartitions: Int)
  * This class extends expression primarily so that transformations over expression will descend
  * into its child.
  */
-case class RangePartitioning(ordering: Seq[SortOrder], numPartitions: Int)
+case class RangePartitioning(
+    ordering: Seq[SortOrder],
+    numPartitions: Int,
+    equivalents: Seq[Seq[SortOrder]] = Nil)
   extends Expression with Partitioning with Unevaluable {
 
-  override def children: Seq[SortOrder] = ordering
+  override def children: Seq[SortOrder] = orderings.flatten
   override def nullable: Boolean = false
   override def dataType: DataType = IntegerType
 
-  private[this] lazy val clusteringSet = ordering.map(_.child).toSet
+  private[this] lazy val orderings = ordering +: equivalents
+
+  private[this] lazy val clusteringSet = orderings.map(_.map(_.child).toSet)
 
   override def satisfies(required: Distribution): Boolean = required match {
     case UnspecifiedDistribution => true
     case OrderedDistribution(requiredOrdering) =>
-      val minSize = Seq(requiredOrdering.size, ordering.size).min
-      requiredOrdering.take(minSize) == ordering.take(minSize)
+      val minSize = Seq(requiredOrdering.size, orderings.map(_.size).min).min
+      orderings.exists(_.take(minSize) == requiredOrdering.take(minSize))
     case ClusteredDistribution(requiredClustering) =>
-      clusteringSet.subsetOf(requiredClustering.toSet)
+      clusteringSet.exists(_.subsetOf(requiredClustering.toSet))
     case _ => false
   }
 
   override def compatibleWith(other: Partitioning): Boolean = other match {
     case BroadcastPartitioning => true
-    case r: RangePartitioning if r == this => true
+    case r: RangePartitioning if r.semanticEquals(this) => true
     case _ => false
   }
 
   override def keyExpressions: Seq[Expression] = ordering.map(_.child)
+
+  override def semanticEquals(other: Expression): Boolean = other match {
+    case RangePartitioning(order, numParts, equivs) =>
+      (ordering +: equivalents).exists((order +: equivs).contains)
+    case _ => false
+  }
 }
