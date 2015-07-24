@@ -1,20 +1,19 @@
-package org.apache.spark.sql.execution
+package org.apache.spark.sql.execution.dynamic
 
-import org.apache.spark.rdd.{CoalescedPartitioner, ShuffledRDD2Partition, RDD}
+import org.apache.spark._
+import org.apache.spark.rdd.RDD
+import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.hash.HashShuffleManager
 import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.shuffle.unsafe.UnsafeShuffleManager
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.errors._
-import org.apache.spark.util.{ThreadUtils, MutablePair}
-import org.apache.spark._
-import org.apache.spark.serializer.Serializer
-import org.apache.spark.sql.catalyst.expressions.{RowOrdering, Attribute}
-import org.apache.spark.sql.catalyst.plans.physical.{SinglePartition, RangePartitioning, HashPartitioning, Partitioning}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, RowOrdering}
+import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning, RangePartitioning, SinglePartition}
+import org.apache.spark.sql.execution._
+import org.apache.spark.util.{MutablePair, ThreadUtils}
 
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext}
 
 case class DynamicExchange(newPartitioning: Partitioning, child: SparkPlan) extends UnaryNode {
 
@@ -47,8 +46,8 @@ case class DynamicExchange(newPartitioning: Partitioning, child: SparkPlan) exte
    * @return true if rows should be copied before being shuffled, false otherwise
    */
   private def needToCopyObjectsBeforeShuffle(
-                                              partitioner: Partitioner,
-                                              serializer: Serializer): Boolean = {
+      partitioner: Partitioner,
+      serializer: Serializer): Boolean = {
     // Note: even though we only use the partitioner's `numPartitions` field, we require it to be
     // passed instead of directly passing the number of partitions in order to guard against
     // corner-cases where a partitioner constructed with `numPartitions` partitions may output
@@ -199,41 +198,6 @@ case class DynamicExchange(newPartitioning: Partitioning, child: SparkPlan) exte
     }(ThreadUtils.sameThread)
 
     new ShuffledRowRDD2(dep, partitionStartIndices.toArray)
-  }
-}
-
-class ShuffledRowRDD2(
-    var dependency: ShuffleDependency[Int, InternalRow, InternalRow],
-    val partitionStartIndices: Array[Int])
-  extends RDD[InternalRow](dependency.rdd.context, Nil) {
-
-  override def getDependencies: Seq[Dependency[_]] = List(dependency)
-
-  override val partitioner = {
-    Some(new CoalescedPartitioner(dependency.partitioner, partitionStartIndices))
-  }
-
-  override def getPartitions: Array[Partition] = {
-    val n = dependency.partitioner.numPartitions
-    Array.tabulate[Partition](partitionStartIndices.length) { i =>
-      val startIndex = partitionStartIndices(i)
-      val endIndex = if (i < partitionStartIndices.length - 1) partitionStartIndices(i + 1) else n
-      new ShuffledRDD2Partition(i, startIndex, endIndex)
-    }
-  }
-
-  override def compute(p: Partition, context: TaskContext): Iterator[InternalRow] = {
-    val sp = p.asInstanceOf[ShuffledRDD2Partition]
-    SparkEnv.get.shuffleManager.getReader(
-      dependency.shuffleHandle, sp.startIndexInParent, sp.endIndexInParent, context)
-      .read()
-      .asInstanceOf[Iterator[Product2[Int, InternalRow]]]
-      .map(_._2)
-  }
-
-  override def clearDependencies() {
-    super.clearDependencies()
-    dependency = null
   }
 }
 

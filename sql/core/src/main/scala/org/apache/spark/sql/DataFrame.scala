@@ -20,6 +20,7 @@ package org.apache.spark.sql
 import java.io.CharArrayWriter
 import java.util.Properties
 
+import org.apache.spark.sql.execution.dynamic.DynamicExchange
 import org.apache.spark.unsafe.types.UTF8String
 
 import scala.language.implicitConversions
@@ -39,7 +40,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, _}
 import org.apache.spark.sql.catalyst.plans.{Inner, JoinType}
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, ScalaReflection, SqlParser}
-import org.apache.spark.sql.execution.{EvaluatePython, ExplainCommand, LogicalRDD, Exchange, DynamicExchange}
+import org.apache.spark.sql.execution.{EvaluatePython, ExplainCommand, LogicalRDD, Exchange}
 import org.apache.spark.sql.execution.datasources.CreateTableUsingAsSelect
 import org.apache.spark.sql.json.JacksonGenerator
 import org.apache.spark.sql.types._
@@ -1379,13 +1380,7 @@ class DataFrame private[sql](
    */
   def collect(): Array[Row] = queryExecution.executedPlan.executeCollect()
 
-  def dynamicCollect(): Array[Row] = {
-    val rewrittenExecutedPlan = queryExecution.executedPlan.transform {
-      case Exchange(newPartitioning, child) => DynamicExchange(newPartitioning, child)
-    }
-
-    rewrittenExecutedPlan.executeCollect()
-  }
+  def dynamicCollect(): Array[Row] = queryExecution.dynamicExecutedPlan.executeCollect()
 
   /**
    * Returns a Java list that contains all of [[Row]]s in this [[DataFrame]].
