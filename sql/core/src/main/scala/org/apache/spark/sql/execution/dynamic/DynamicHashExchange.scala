@@ -8,14 +8,17 @@ import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.shuffle.unsafe.UnsafeShuffleManager
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.errors._
-import org.apache.spark.sql.catalyst.expressions.{Attribute, RowOrdering}
-import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning, RangePartitioning, SinglePartition}
+import org.apache.spark.sql.catalyst.expressions.{Attribute}
+import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning}
 import org.apache.spark.sql.execution._
 import org.apache.spark.util.{MutablePair, ThreadUtils}
 
 import scala.collection.mutable.ArrayBuffer
 
-case class DynamicExchange(newPartitioning: Partitioning, child: SparkPlan) extends UnaryNode {
+case class DynamicHashExchange(
+    newPartitioning: HashPartitioning,
+    child: SparkPlan)
+  extends UnaryNode {
 
   override def outputPartitioning: Partitioning = newPartitioning
 
@@ -120,29 +123,9 @@ case class DynamicExchange(newPartitioning: Partitioning, child: SparkPlan) exte
 
   protected override def doExecute(): RDD[InternalRow] = attachTree(this , "execute") {
     val rdd = child.execute()
-    val part: Partitioner = newPartitioning match {
-      case HashPartitioning(expressions, numPartitions) => new HashPartitioner(numPartitions)
-      case RangePartitioning(sortingExpressions, numPartitions) =>
-        // Internally, RangePartitioner runs a job on the RDD that samples keys to compute
-        // partition bounds. To get accurate samples, we need to copy the mutable keys.
-        val rddForSampling = rdd.mapPartitions { iter =>
-          val mutablePair = new MutablePair[InternalRow, Null]()
-          iter.map(row => mutablePair.update(row.copy(), null))
-        }
-        implicit val ordering = new RowOrdering(sortingExpressions, child.output)
-        new RangePartitioner(numPartitions, rddForSampling, ascending = true)
-      case SinglePartition =>
-        new Partitioner {
-          override def numPartitions: Int = 1
-          override def getPartition(key: Any): Int = 0
-        }
-      case _ => sys.error(s"Exchange not implemented for $newPartitioning")
-      // TODO: Handle BroadcastPartitioning.
-    }
-    def getPartitionKeyExtractor(): InternalRow => InternalRow = newPartitioning match {
-      case HashPartitioning(expressions, _) => newMutableProjection(expressions, child.output)()
-      case RangePartitioning(_, _) | SinglePartition => identity
-      case _ => sys.error(s"Exchange not implemented for $newPartitioning")
+    val part: Partitioner = new HashPartitioner(newPartitioning.numPartitions)
+    def getPartitionKeyExtractor(): InternalRow => InternalRow = {
+      newMutableProjection(newPartitioning.expressions, child.output)()
     }
     val rddWithPartitionIds: RDD[Product2[Int, InternalRow]] = {
       if (needToCopyObjectsBeforeShuffle(part, serializer)) {
