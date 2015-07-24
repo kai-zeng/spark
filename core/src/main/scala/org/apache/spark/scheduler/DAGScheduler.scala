@@ -35,7 +35,7 @@ import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.partial.{ApproximateActionListener, ApproximateEvaluator, PartialResult}
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{ShuffledRDD2, DynamicJoinedRDD, RDD}
 import org.apache.spark.rpc.RpcTimeout
 import org.apache.spark.storage._
 import org.apache.spark.util._
@@ -1450,6 +1450,8 @@ class DAGScheduler(
         // For shuffle dependencies, pick locations which have at least REDUCER_PREF_LOCS_FRACTION
         // of data as preferred locations
         if (shuffleLocalityEnabled &&
+            !rdd.isInstanceOf[DynamicJoinedRDD[_, _, _]] &&  // Hack
+            !rdd.isInstanceOf[ShuffledRDD2[_, _, _]] &&      // Hack
             rdd.partitions.size < SHUFFLE_PREF_REDUCE_THRESHOLD &&
             s.rdd.partitions.size < SHUFFLE_PREF_MAP_THRESHOLD) {
           // Get the preferred map output locations for this reducer
