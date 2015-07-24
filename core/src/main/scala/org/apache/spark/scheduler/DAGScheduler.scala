@@ -1073,15 +1073,6 @@ class DAGScheduler(
               shuffleStage.addOutputLoc(smt.partitionId, status)
             }
 
-            // Mark the task as finished in any map-stage jobs waiting on this stage
-            for (job <- shuffleStage.waitingJobs) {
-              if (!job.finished(smt.partitionId)) {
-                job.finished(smt.partitionId) = true
-                job.numFinished += 1
-                job.listener.taskSucceeded(smt.partitionId, null)
-              }
-            }
-
             if (runningStages.contains(shuffleStage) && shuffleStage.pendingTasks.isEmpty) {
               markStageAsFinished(shuffleStage)
               logInfo("looking for newly runnable stages")
@@ -1129,6 +1120,15 @@ class DAGScheduler(
                     shuffleStage.rdd + "), which is now runnable")
                   submitMissingTasks(shuffleStage, jobId)
                 }
+              }
+            }
+
+            // Mark the task as finished in any map-stage jobs waiting on this stage
+            for (job <- shuffleStage.waitingJobs) {
+              if (!job.finished(smt.partitionId)) {
+                job.finished(smt.partitionId) = true
+                job.numFinished += 1
+                job.listener.taskSucceeded(smt.partitionId, null)
               }
             }
           }
