@@ -21,6 +21,8 @@ import java.beans.Introspector
 import java.util.Properties
 import java.util.concurrent.atomic.AtomicReference
 
+import org.apache.spark.sql.execution.dynamic.AddDynamicExchange
+
 import scala.collection.JavaConversions._
 import scala.collection.immutable
 import scala.language.implicitConversions
@@ -937,6 +939,20 @@ class SQLContext(@transient val sparkContext: SparkContext)
     )
   }
 
+  /**
+   * Prepares a adaptively planned SparkPlan for execution by inserting shuffle operations
+   * and internal row format conversions as needed.
+   */
+  @transient
+  protected[sql] val prepareForDynamicExecution = new RuleExecutor[SparkPlan] {
+    val batches = Seq(
+      Batch("Add operators for row reorganization", Once,
+        EnsureRequirements(self),
+        AddDynamicExchange(self)),
+      Batch("Add row converters", Once, EnsureRowFormats)
+    )
+  }
+
   protected[sql] def openSession(): SQLSession = {
     detachSession()
     val session = createSession()
@@ -991,6 +1007,9 @@ class SQLContext(@transient val sparkContext: SparkContext)
     // executedPlan should not be used to initialize any SparkPlan. It should be
     // only used for execution.
     lazy val executedPlan: SparkPlan = prepareForExecution.execute(sparkPlan)
+
+    // An executedPlan that runs the plan adaptively.
+    lazy val dynamicExecutedPlan: SparkPlan = prepareForDynamicExecution.execute(sparkPlan)
 
     /** Internal version of the RDD. Avoids copies and has no schema */
     lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
