@@ -18,6 +18,7 @@
 package org.apache.spark.sql.execution.dynamic
 
 import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.{Exchange, SparkPlan}
 import org.apache.spark.sql.execution.aggregate.Aggregate2Sort
@@ -32,19 +33,25 @@ import org.apache.spark.sql.execution.aggregate.Aggregate2Sort
 private[sql] case class AddDynamicExchange(sqlContext: SQLContext) extends Rule[SparkPlan] {
 
   def apply(plan: SparkPlan): SparkPlan = plan.transformDown {
-    case ExtractAggregateAndExchange(aggregate, child, exchange) =>
-      val dynamicExchangeForAggregate = DynamicExchange(exchange.newPartitioning, exchange.child)
+    case ExtractAggregateChildAndExchange(aggregate, child, hashPartitioning, exchangeChild) =>
+      val dynamicExchangeForAggregate = DynamicHashExchange(hashPartitioning, exchangeChild)
       aggregate.withNewChildren(child.withNewChildren(dynamicExchangeForAggregate :: Nil) :: Nil)
+    case aggregate @ Aggregate2Sort(_, _, _, _, _, Exchange(hash: HashPartitioning, child)) =>
+      val dynamicExchangeForAggregate = DynamicHashExchange(hash, child)
+      aggregate.withNewChildren(dynamicExchangeForAggregate :: Nil)
   }
 }
 
-private[sql] object ExtractAggregateAndExchange {
-  def unapply(plan: SparkPlan): Option[(Aggregate2Sort, SparkPlan, Exchange)] = plan match {
+private[sql] object ExtractAggregateChildAndExchange {
+  type ReturnType = (Aggregate2Sort, SparkPlan, HashPartitioning, SparkPlan)
+
+  def unapply(plan: SparkPlan): Option[ReturnType] = plan match {
     case aggregate: Aggregate2Sort =>
       val child = aggregate.child
       if (child.children.length == 1) {
         child.children.head match {
-          case exchange: Exchange => Some((aggregate, child, exchange))
+          case Exchange(hash: HashPartitioning, exchangeChild) =>
+            Some((aggregate, child, hash, exchangeChild))
           case _ => None
         }
       } else {

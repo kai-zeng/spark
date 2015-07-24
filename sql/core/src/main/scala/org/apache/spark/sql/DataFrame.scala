@@ -20,7 +20,7 @@ package org.apache.spark.sql
 import java.io.CharArrayWriter
 import java.util.Properties
 
-import org.apache.spark.sql.execution.dynamic.DynamicExchange
+import org.apache.spark.sql.execution.dynamic.DynamicHashExchange
 import org.apache.spark.unsafe.types.UTF8String
 
 import scala.language.implicitConversions
