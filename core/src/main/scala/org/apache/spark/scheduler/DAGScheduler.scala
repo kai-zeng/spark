@@ -501,6 +501,8 @@ class DAGScheduler(
     job.finalStage match {
       case r: ResultStage =>
         r.resultOfJob = None
+      case m: ShuffleMapStage =>
+        m.waitingJobs = m.waitingJobs.filter(_ != job)
     }
   }
 
@@ -525,6 +527,7 @@ class DAGScheduler(
 
     val jobId = nextJobId.getAndIncrement()
     if (partitions.size == 0) {
+      // Return immediately if the job is running 0 tasks
       return new JobWaiter[U](this, jobId, 0, resultHandler)
     }
 
@@ -583,17 +586,17 @@ class DAGScheduler(
   def submitMapStage[K, V, C](
       dependency: ShuffleDependency[K, V, C],
       callSite: CallSite,
-      resultHandler: (Int, Any) => Unit,
       properties: Properties): JobWaiter[Any] = {
 
     val rdd = dependency.rdd
     val jobId = nextJobId.getAndIncrement()
     if (rdd.partitions.size == 0) {
-      return new JobWaiter[Any](this, jobId, 0, resultHandler)
+      // Return immediately if the job is running 0 tasks
+      return new JobWaiter[Any](this, jobId, 0, (i: Int, r: Any) => {})
     }
 
     assert(rdd.partitions.size > 0)
-    val waiter = new JobWaiter(this, jobId, rdd.partitions.size, resultHandler)
+    val waiter = new JobWaiter(this, jobId, rdd.partitions.size, (i: Int, r: Any) => {})
     eventProcessLoop.post(MapStageSubmitted(
       jobId, dependency, callSite, waiter, SerializationUtils.clone(properties)))
     waiter
@@ -766,7 +769,7 @@ class DAGScheduler(
         SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
       submitStage(finalStage)
     }
-    submitWaitingStages()
+    submitWaitingStages()   // TODO: Do we need this if finalStage is null?
   }
 
   private[scheduler] def handleMapStageSubmitted(jobId: Int,
@@ -788,24 +791,41 @@ class DAGScheduler(
         return
     }
     if (finalStage != null) {
-      val job = new ActiveJob(jobId, finalStage, null, null, callSite, listener, properties)
-      clearCacheLocs()
-      logInfo("Got map stage job %s (%s) with %d output partitions".format(
-        jobId, callSite.shortForm, dependency.rdd.partitions.size))
-      logInfo("Final stage: " + finalStage + "(" + finalStage.name + ")")
-      logInfo("Parents of final stage: " + finalStage.parents)
-      logInfo("Missing parents: " + getMissingParentStages(finalStage))
-      val jobSubmissionTime = clock.getTimeMillis()
-      jobIdToActiveJob(jobId) = job
-      activeJobs += job
-      //finalStage.resultOfJob = Some(job)
-      val stageIds = jobIdToStageIds(jobId).toArray
-      val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
-      listenerBus.post(
-        SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
-      submitStage(finalStage)
+      if (finalStage.isAvailable) {
+        // The stage is completely finished already, so tell the listener that all tasks are done
+        for (i <- 0 until finalStage.numPartitions) {
+          listener.taskSucceeded(i, null)
+        }
+      } else {
+        val job = new ActiveJob(jobId, finalStage, null, null, callSite, listener, properties)
+        clearCacheLocs()
+        logInfo("Got map stage job %s (%s) with %d output partitions".format(
+          jobId, callSite.shortForm, dependency.rdd.partitions.size))
+        logInfo("Final stage: " + finalStage + "(" + finalStage.name + ")")
+        logInfo("Parents of final stage: " + finalStage.parents)
+        logInfo("Missing parents: " + getMissingParentStages(finalStage))
+
+        // Mark any finished tasks in the stage as such so the listener knows about them
+        for (i <- 0 until finalStage.numPartitions) {
+          if (finalStage.outputLocs(i).nonEmpty) {
+            job.finished(i) = true
+            job.numFinished += 1
+            listener.taskSucceeded(i, null)
+          }
+        }
+
+        val jobSubmissionTime = clock.getTimeMillis()
+        jobIdToActiveJob(jobId) = job
+        activeJobs += job
+        finalStage.waitingJobs = job :: finalStage.waitingJobs
+        val stageIds = jobIdToStageIds(jobId).toArray
+        val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
+        listenerBus.post(
+          SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
+        submitStage(finalStage)
+      }
     }
-    submitWaitingStages()
+    submitWaitingStages()   // TODO: Do we need this if finalStage is null?
   }
 
   /** Submits stage, but first recursively submits any missing parents. */
@@ -1051,6 +1071,15 @@ class DAGScheduler(
               logInfo(s"Ignoring possibly bogus $smt completion from executor $execId")
             } else {
               shuffleStage.addOutputLoc(smt.partitionId, status)
+            }
+
+            // Mark the task as finished in any map-stage jobs waiting on this stage
+            for (job <- shuffleStage.waitingJobs) {
+              if (!job.finished(smt.partitionId)) {
+                job.finished(smt.partitionId) = true
+                job.numFinished += 1
+                job.listener.taskSucceeded(smt.partitionId, null)
+              }
             }
 
             if (runningStages.contains(shuffleStage) && shuffleStage.pendingTasks.isEmpty) {
