@@ -47,6 +47,8 @@ class DynamicJoinedRDD[K, V, W](
     val shufflePartitionIds: Array[Int])
   extends RDD[(K, (V, W))](dep1.rdd.context, Nil) {
 
+  override def getDependencies: Seq[Dependency[_]] = List(dep1, dep2)
+
   override protected def getPartitions: Array[Partition] = {
     val parentPartitions = dep1.partitioner.numPartitions
     var maxShufflePartitionId = -1
@@ -141,6 +143,12 @@ class DynamicJoinedRDD[K, V, W](
         values.map(w => (k, (v, w)))
       }
     }
+  }
+
+  override def clearDependencies() {
+    super.clearDependencies()
+    dep1 = null
+    dep2 = null
   }
 }
 
