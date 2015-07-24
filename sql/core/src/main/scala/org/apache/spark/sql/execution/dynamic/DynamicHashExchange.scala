@@ -149,12 +149,10 @@ case class DynamicHashExchange(
     val future = sparkContext.submitMapStage(dep)
 
     val partitionStartIndices = ArrayBuffer[Int]()
-
+    val targetSizePerReducer = sqlContext.conf.targetSizePerReducer
     future.onComplete {
       case scala.util.Success(mapOutputStats) =>
         val bytesByPartitionId = mapOutputStats.bytesByPartitionId
-        val targetSizePerReducer = 64 * 1024 * 1024
-
         var i = 0
         var currentStartIndex = 0
         var currentSize = 0L
@@ -175,7 +173,11 @@ case class DynamicHashExchange(
           i += 1
         }
         if (partitionStartIndices.length == 0) {
+          // All map output rows will go to a single reducer.
           partitionStartIndices += 0
+        } else {
+          // This is the last currentStartIndex.
+          partitionStartIndices += currentStartIndex
         }
       case scala.util.Failure(t) => sys.error("What to do when we have failure?")
     }(ThreadUtils.sameThread)
@@ -183,4 +185,3 @@ case class DynamicHashExchange(
     new ShuffledRowRDD2(dep, partitionStartIndices.toArray)
   }
 }
-

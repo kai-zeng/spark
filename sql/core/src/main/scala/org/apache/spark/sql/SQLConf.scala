@@ -409,6 +409,10 @@ private[spark] object SQLConf {
     "spark.sql.useSerializer2",
     defaultValue = Some(true), isPublic = false)
 
+  val TARGET_SIZE_PER_REDUCER = intConf(
+    "spark.sql.targetSizePerReducer",
+    defaultValue = Some(64 * 1024 * 1024), isPublic = false)
+
   object Deprecated {
     val MAPRED_REDUCE_TASKS = "mapred.reduce.tasks"
   }
@@ -518,6 +522,8 @@ private[sql] class SQLConf extends Serializable with CatalystConf {
     getConf(DATAFRAME_SELF_JOIN_AUTO_RESOLVE_AMBIGUITY)
 
   private[spark] def dataFrameRetainGroupColumns: Boolean = getConf(DATAFRAME_RETAIN_GROUP_COLUMNS)
+
+  private[spark] def targetSizePerReducer: Int = getConf(TARGET_SIZE_PER_REDUCER)
 
   /** ********************** SQLConf functionality methods ************ */
 
