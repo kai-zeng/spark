@@ -166,6 +166,8 @@ case class HashPartitioning(expressions: Seq[Expression], numPartitions: Int)
   }
 
   override def keyExpressions: Seq[Expression] = expressions
+
+  override def toString: String = s"${expressions} $numPartitions"
 }
 
 /**

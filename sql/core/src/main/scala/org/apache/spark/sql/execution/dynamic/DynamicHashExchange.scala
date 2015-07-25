@@ -16,11 +16,13 @@ import org.apache.spark.util.{MutablePair, ThreadUtils}
 import scala.collection.mutable.ArrayBuffer
 
 case class DynamicHashExchange(
-    newPartitioning: HashPartitioning,
+    initialPartitioning: HashPartitioning,
     child: SparkPlan)
   extends UnaryNode {
 
-  override def outputPartitioning: Partitioning = newPartitioning
+  private var _newPartitioning = initialPartitioning
+
+  override def outputPartitioning: Partitioning = _newPartitioning
 
   override def output: Seq[Attribute] = child.output
 
@@ -123,9 +125,9 @@ case class DynamicHashExchange(
 
   protected override def doExecute(): RDD[InternalRow] = attachTree(this , "execute") {
     val rdd = child.execute()
-    val part: Partitioner = new HashPartitioner(newPartitioning.numPartitions)
+    val part: Partitioner = new HashPartitioner(initialPartitioning.numPartitions)
     def getPartitionKeyExtractor(): InternalRow => InternalRow = {
-      newMutableProjection(newPartitioning.expressions, child.output)()
+      newMutableProjection(initialPartitioning.expressions, child.output)()
     }
     val rddWithPartitionIds: RDD[Product2[Int, InternalRow]] = {
       if (needToCopyObjectsBeforeShuffle(part, serializer)) {
@@ -181,6 +183,10 @@ case class DynamicHashExchange(
         }
       case scala.util.Failure(t) => sys.error("What to do when we have failure?")
     }(ThreadUtils.sameThread)
+
+    // Update the output partitioning.
+    _newPartitioning =
+      HashPartitioning(initialPartitioning.expressions, partitionStartIndices.length)
 
     new ShuffledRowRDD2(dep, partitionStartIndices.toArray)
   }
