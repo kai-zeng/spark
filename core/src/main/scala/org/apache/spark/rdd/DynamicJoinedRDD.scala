@@ -85,7 +85,7 @@ class DynamicJoinedRDD[K, V, W](
       }
       val endPos = pos
       partitions(shufflePart) = new DynamicJoinedRDDPartition(
-        shufflePart, startPos, endPos, startPos, endPos, true)
+        shufflePart, PartitionStrategy.SHUFFLE, startPos, endPos, startPos, endPos, true)
     }
 
     var outputPos = numShufflePartitions
@@ -93,13 +93,13 @@ class DynamicJoinedRDD[K, V, W](
       if (partitionStrategies(i) == PartitionStrategy.BRING_TO_1) {
         for (j <- 0 until parentPartitions) {
           partitions(outputPos) = new DynamicJoinedRDDPartition(
-            outputPos, j, j + 1, i, i + 1, false)
+            outputPos, PartitionStrategy.BRING_TO_1, j, j + 1, i, i + 1, false)
           outputPos += 1
         }
       } else if (partitionStrategies(i) == PartitionStrategy.BRING_TO_2) {
         for (j <- 0 until parentPartitions) {
           partitions(outputPos) = new DynamicJoinedRDDPartition(
-            outputPos, i, i + 1, j, j + 1, true)
+            outputPos, PartitionStrategy.BRING_TO_2, i, i + 1, j, j + 1, true)
           outputPos += 1
         }
       }
@@ -145,6 +145,21 @@ class DynamicJoinedRDD[K, V, W](
     }
   }
 
+  override def getPreferredLocations(partition: Partition): Seq[String] = {
+    val part = partition.asInstanceOf[DynamicJoinedRDDPartition]
+    if (part.strategy == PartitionStrategy.BRING_TO_1) {
+      // TODO: should support passing loc.executorId as a preferred location too
+      val tracker = SparkEnv.get.mapOutputTracker
+      tracker.getMapOutputLocation(dep1.shuffleId, part.rdd1StartPartition).map(_.host).toList
+    } else if (part.strategy == PartitionStrategy.BRING_TO_2) {
+      // TODO: should support passing loc.executorId as a preferred location too
+      val tracker = SparkEnv.get.mapOutputTracker
+      tracker.getMapOutputLocation(dep2.shuffleId, part.rdd2StartPartition).map(_.host).toList
+    } else {
+      Nil
+    }
+  }
+
   override def clearDependencies() {
     super.clearDependencies()
     dep1 = null
@@ -158,6 +173,7 @@ class DynamicJoinedRDD[K, V, W](
  */
 class DynamicJoinedRDDPartition(
     val index: Int,
+    val strategy: PartitionStrategy.PartitionStrategy,
     val rdd1StartPartition: Int,
     val rdd1EndPartition: Int,
     val rdd2StartPartition: Int,
@@ -165,5 +181,6 @@ class DynamicJoinedRDDPartition(
     val hash1: Boolean)
   extends Partition {
 
-  override def toString = s"DynamicJoinedPartition($index,$rdd1StartPartition,$rdd1EndPartition,$rdd2StartPartition,$rdd2EndPartition,$hash1)"
+  override def toString =
+    s"DynamicJoinedPartition($index,$strategy,$rdd1StartPartition,$rdd1EndPartition,$rdd2StartPartition,$rdd2EndPartition,$hash1)"
 }

@@ -174,6 +174,19 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
   }
 
   /**
+   * Return the location of a given map tasks's output, if present. Only callable on driver.
+   */
+  def getMapOutputLocation(shuffleId: Int, mapId: Int): Option[BlockManagerId] = {
+    if (mapStatuses.contains(shuffleId)) {
+      val statuses = mapStatuses(shuffleId)
+      if (statuses.nonEmpty && statuses(mapId) != null) {
+        return Some(statuses(mapId).location)
+      }
+    }
+    None
+  }
+
+  /**
    * Get or fetch the array of MapStatuses for a given shuffle ID. NOTE: clients MUST synchronize
    * on this array when reading it, because on the driver, we may be changing it in place.
    *
