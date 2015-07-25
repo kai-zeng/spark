@@ -1129,6 +1129,12 @@ class DAGScheduler(
                 job.finished(smt.partitionId) = true
                 job.numFinished += 1
                 job.listener.taskSucceeded(smt.partitionId, null)
+                // If the whole job has finished, remove it
+                if (job.numFinished == job.numPartitions) {
+                  cleanupStateForJobAndIndependentStages(job)
+                  listenerBus.post(
+                    SparkListenerJobEnd(job.jobId, clock.getTimeMillis(), JobSucceeded))
+                }
               }
             }
           }
