@@ -118,8 +118,7 @@ case object SinglePartition extends Partitioning {
   override def satisfies(required: Distribution): Boolean = true
 
   override def compatibleWith(other: Partitioning): Boolean = other match {
-    case SinglePartition => true
-    case _ => false
+    case _ => true
   }
 
   override def keyExpressions: Seq[Expression] = Nil
@@ -131,8 +130,7 @@ case object BroadcastPartitioning extends Partitioning {
   override def satisfies(required: Distribution): Boolean = true
 
   override def compatibleWith(other: Partitioning): Boolean = other match {
-    case SinglePartition => true
-    case _ => false
+    case _ => true
   }
 
   override def keyExpressions: Seq[Expression] = Nil
